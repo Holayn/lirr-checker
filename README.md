@@ -27,9 +27,10 @@ cp .env.example .env
 
 Edit `.env`:
 
-| Variable     | Description                             |
-| ------------ | --------------------------------------- |
-| `NOTIFY_URL` | URL to POST notifications to (optional) |
+| Variable        | Description                                                          |
+| --------------- | -------------------------------------------------------------------- |
+| `NOTIFY_URL`    | URL to POST notifications to (optional)                              |
+| `SPEAK_COMMAND` | Command to use for text-to-speech (optional, defaults to system TTS) |
 
 ### 3. Add a ding sound
 
