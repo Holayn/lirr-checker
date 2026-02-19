@@ -93,8 +93,8 @@ async function checkDeparture(entry, gtfsData) {
     const delayInfo = getTripDelay(feed, trip.tripId, trip.srcStopId);
     const status = formatDelay(delayInfo.delay);
     const msg =
-      `Train from ${trip.srcStopName} to ${trip.dstStopName}, ` +
-      `departing ${dayjs(trip.scheduledDep, 'HH:mm:ss').format('h:mm A')}, is ${status}.`;
+      `${dayjs(trip.scheduledDep, 'HH:mm:ss').format('h:mm A')} train, from ${trip.srcStopName} to ${trip.dstStopName}, ` +
+      `is ${status}.`;
 
     announcements.push({ msg, audio });
     postNotification(msg, users)
