@@ -1,0 +1,10 @@
+[
+  {
+    "source": "Mineola",
+    "destination": "Penn Station",
+    "departureTime": "11:14",
+    "days": ["mon", "tue", "wed", "thu", "fri"],
+    "users": [],
+    "audio": true
+  }
+]
