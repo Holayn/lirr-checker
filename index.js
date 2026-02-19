@@ -90,7 +90,7 @@ async function checkDeparture(entry, gtfsData) {
   for (const trip of trips) {
     const delayInfo = getTripDelay(feed, trip.tripId, trip.srcStopId);
     const status = formatDelay(delayInfo.delay);
-    const rtNote = delayInfo.found ? '' : ' (no real-time delay found)';
+    const rtNote = delayInfo.found ? '' : ', (no real-time delay found)';
     const msg =
       `Train from ${trip.srcStopName} to ${trip.dstStopName}, ` +
       `departing ${trip.scheduledDep}, is ${status}${rtNote}.`;
