@@ -56,15 +56,19 @@ async function checkDeparture(entry, gtfsData) {
   } catch (err) {
     const msg = `Error finding trips: ${err.message}`;
     logger.error(msg);
-    await announce(msg, audio);
-    await postNotification(msg, users);
+    await Promise.all([
+      announce(msg, audio),
+      postNotification(msg, users)
+    ]);
     return;
   }
 
   if (trips.length === 0) {
     const msg = `No scheduled train found from ${source} to ${destination} at ${departureTime} today.`;
-    await announce(msg, audio);
-    await postNotification(msg, users);
+    await Promise.all([
+      announce(msg, audio),
+      postNotification(msg, users)
+    ]);
     return;
   }
 
@@ -74,10 +78,14 @@ async function checkDeparture(entry, gtfsData) {
   } catch (err) {
     const msg = `Could not fetch real-time data: ${err.message}`;
     logger.error(msg);
-    await announce(msg, audio);
-    await postNotification(msg, users);
+    await Promise.all([
+      announce(msg, audio),
+      postNotification(msg, users)
+    ]);
     return;
   }
+
+  const announcements = [];
 
   for (const trip of trips) {
     const delayInfo = getTripDelay(feed, trip.tripId, trip.srcStopId);
@@ -87,8 +95,12 @@ async function checkDeparture(entry, gtfsData) {
       `Train from ${trip.srcStopName} to ${trip.dstStopName}, ` +
       `departing ${trip.scheduledDep}, is ${status}${rtNote}.`;
 
+    announcements.push({ msg, audio });
+    postNotification(msg, users)
+  }
+
+  for (const { msg, audio } of announcements) {
     await announce(msg, audio);
-    await postNotification(msg, users);
   }
 }
 
