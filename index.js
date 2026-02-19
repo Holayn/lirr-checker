@@ -111,13 +111,6 @@ async function main() {
   logger.info('=== LIRR Train Status Checker ===');
 
   let gtfsData;
-  try {
-    await ensureStaticGtfs();
-    gtfsData = loadStaticGtfs();
-  } catch (err) {
-    logger.error(`Startup failed: ${err.message}`);
-    process.exit(1);
-  }
 
   logger.info(
     `Running. Checking departures within ${NOTIFY_WINDOW / 60} minutes of scheduled time.`
@@ -126,6 +119,14 @@ async function main() {
   const lastChecked = {};
 
   async function runChecks() {
+    try {
+      await ensureStaticGtfs();
+      gtfsData = loadStaticGtfs();
+    } catch (err) {
+      logger.error(`Failed to load static GTFS: ${err.message}`);
+      process.exit(1);
+    }
+
     let config;
     try {
       config = loadConfig();
@@ -155,6 +156,8 @@ async function main() {
     for (const k of Object.keys(lastChecked)) {
       if (!k.endsWith(`|${today}`)) delete lastChecked[k];
     }
+
+    gtfsData = null;
   }
 
   await runChecks();
