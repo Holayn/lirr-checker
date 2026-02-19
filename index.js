@@ -6,8 +6,10 @@ const path = require('path');
 
 const dayjs = require('dayjs');
 const duration = require('dayjs/plugin/duration');
+const customParseFormat = require('dayjs/plugin/customParseFormat');
 
 dayjs.extend(duration);
+dayjs.extend(customParseFormat);
 
 const logger = require('./lib/logger');
 const { announce } = require('./lib/audio');
@@ -92,7 +94,7 @@ async function checkDeparture(entry, gtfsData) {
     const status = formatDelay(delayInfo.delay);
     const msg =
       `Train from ${trip.srcStopName} to ${trip.dstStopName}, ` +
-      `departing ${trip.scheduledDep}, is ${status}.`;
+      `departing ${dayjs(trip.scheduledDep, 'HH:mm:ss').format('h:mm A')}, is ${status}.`;
 
     announcements.push({ msg, audio });
     postNotification(msg, users)
