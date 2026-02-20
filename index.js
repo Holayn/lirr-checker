@@ -58,20 +58,18 @@ async function checkDeparture(entry, gtfsData) {
   } catch (err) {
     const msg = `Error finding trips: ${err.message}`;
     logger.error(msg);
-    await Promise.all([
-      announce(msg, audio),
-      postNotification(msg, users)
-    ]);
-    return;
+    return {
+      success: false,
+      message: msg
+    };
   }
 
   if (trips.length === 0) {
     const msg = `No scheduled train found from ${source} to ${destination} at ${departureTime} today.`;
-    await Promise.all([
-      announce(msg, audio),
-      postNotification(msg, users)
-    ]);
-    return;
+    return {
+      success: true,
+      message: msg,
+    }
   }
 
   let feed;
@@ -80,14 +78,13 @@ async function checkDeparture(entry, gtfsData) {
   } catch (err) {
     const msg = `Could not fetch real-time data: ${err.message}`;
     logger.error(msg);
-    await Promise.all([
-      announce(msg, audio),
-      postNotification(msg, users)
-    ]);
-    return;
+    return {
+      success: false,
+      message: msg
+    };
   }
 
-  const announcements = [];
+  const results = [];
 
   for (const trip of trips) {
     const delayInfo = getTripDelay(feed, trip.tripId, trip.srcStopId);
@@ -96,12 +93,12 @@ async function checkDeparture(entry, gtfsData) {
       `${dayjs(trip.scheduledDep, 'HH:mm:ss').format('h:mm A')} train, from ${trip.srcStopName} to ${trip.dstStopName}, ` +
       `is ${status}.`;
 
-    announcements.push({ msg, audio });
-    postNotification(msg, users)
+    results.push(msg);
   }
-
-  for (const { msg, audio } of announcements) {
-    await announce(msg, audio);
+  
+  return {
+    success: true,
+    message: results.join('\n'),
   }
 }
 
@@ -117,6 +114,7 @@ async function main() {
   );
 
   const lastChecked = {};
+  const checkResults = {};
 
   async function runChecks() {
     try {
@@ -136,6 +134,7 @@ async function main() {
     }
 
     const now = nowSecs();
+    const announcements = [];
 
     for (const entry of config) {
       const today = dayjs().format('ddd').toLowerCase();
@@ -148,7 +147,26 @@ async function main() {
       if (Date.now() - (lastChecked[key] || 0) < CHECK_THROTTLE) continue;
 
       lastChecked[key] = Date.now();
-      await checkDeparture(entry, gtfsData);
+      
+      const { success, message } = await checkDeparture(entry, gtfsData);
+
+      if (!success) {
+        postNotification(message, entry.users);
+      } else {
+        // Only notify if the message changes, which is what we really care about.
+        const existing = checkResults[key];
+        if (existing && existing === message) {
+          continue;
+        }
+
+        checkResults[key] = message;
+        postNotification(message, entry.users);
+        announcements.push({ msg: message, audio: true });
+      }
+    }
+
+    for (const { msg, audio } of announcements) {
+      await announce(msg, audio);
     }
 
     // Prune keys from previous days
