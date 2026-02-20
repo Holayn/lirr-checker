@@ -3,6 +3,7 @@
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
+const express = require('express');
 
 const dayjs = require('dayjs');
 const duration = require('dayjs/plugin/duration');
@@ -14,12 +15,7 @@ dayjs.extend(customParseFormat);
 const logger = require('./lib/logger');
 const { announce } = require('./lib/audio');
 const { postNotification } = require('./lib/notify');
-const {
-  ensureStaticGtfs,
-  loadStaticGtfs,
-  findMatchingTrips,
-  todayDateStr,
-} = require('./lib/gtfs-static');
+const { ensureStaticGtfs, loadStaticGtfs, findMatchingTrips } = require('./lib/gtfs-static');
 const { fetchRealtimeFeed, getTripDelay, formatDelay } = require('./lib/gtfs-realtime');
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -27,6 +23,13 @@ const { fetchRealtimeFeed, getTripDelay, formatDelay } = require('./lib/gtfs-rea
 const NOTIFY_WINDOW = 30 * 60; // seconds before departure to start checking
 const CHECK_THROTTLE = 5 * 60 * 1000; // ms between checks for the same departure
 const POLL_INTERVAL = 60 * 1000; // main loop cadence
+const HTTP_PORT = process.env.HTTP_PORT || 3000;
+
+// ─── Snooze / skip state ──────────────────────────────────────────────────────
+// snoozeUntil: Date — suppress all checks until this timestamp
+// skipDates: Set<string> — date strings (YYYYMMDD) for which checks are skipped
+let snoozeUntil = null;
+const skipDates = new Set();
 
 function loadConfig() {
   return JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8'));
@@ -42,6 +45,10 @@ function nowSecs() {
   return now.diff(now.startOf('day'), 'second');
 }
 
+function todayDateStr() {
+  return dayjs().format('YYYYMMDD');
+}
+
 function departureKey(entry) {
   return `${entry.source}|${entry.destination}|${entry.departureTime}|${todayDateStr()}`;
 }
@@ -49,7 +56,7 @@ function departureKey(entry) {
 // ─── Per-departure check ──────────────────────────────────────────────────────
 
 async function checkDeparture(entry, gtfsData) {
-  const { source, destination, departureTime, users, audio } = entry;
+  const { source, destination, departureTime } = entry;
   logger.info(`[CHECK] ${source} → ${destination} at ${departureTime}`);
 
   let trips;
@@ -60,7 +67,7 @@ async function checkDeparture(entry, gtfsData) {
     logger.error(msg);
     return {
       success: false,
-      message: msg
+      message: msg,
     };
   }
 
@@ -69,7 +76,7 @@ async function checkDeparture(entry, gtfsData) {
     return {
       success: true,
       message: msg,
-    }
+    };
   }
 
   let feed;
@@ -80,7 +87,7 @@ async function checkDeparture(entry, gtfsData) {
     logger.error(msg);
     return {
       success: false,
-      message: msg
+      message: msg,
     };
   }
 
@@ -95,11 +102,11 @@ async function checkDeparture(entry, gtfsData) {
 
     results.push(msg);
   }
-  
+
   return {
     success: true,
     message: results.join('\n'),
-  }
+  };
 }
 
 // ─── Main loop ────────────────────────────────────────────────────────────────
@@ -117,6 +124,16 @@ async function main() {
   const checkResults = {};
 
   async function runChecks() {
+    if (snoozeUntil && dayjs().isBefore(snoozeUntil)) {
+      logger.info(`[SNOOZE] Checks snoozed until ${snoozeUntil.format('h:mm A')}. Skipping.`);
+      return;
+    }
+
+    if (skipDates.has(todayDateStr())) {
+      logger.info(`[SKIP] Checks skipped for ${todayDateStr()}.`);
+      return;
+    }
+
     try {
       await ensureStaticGtfs();
       gtfsData = loadStaticGtfs();
@@ -137,21 +154,22 @@ async function main() {
     const announcements = [];
 
     for (const entry of config) {
+      const { days, users, audio, departureTime } = entry;
       const today = dayjs().format('ddd').toLowerCase();
-      if (entry.days && !entry.days.includes(today)) continue;
+      if (days && !days.includes(today)) continue;
 
-      const secsUntil = timeSecs(entry.departureTime) - now;
+      const secsUntil = timeSecs(departureTime) - now;
       if (secsUntil < 0 || secsUntil > NOTIFY_WINDOW) continue;
 
       const key = departureKey(entry);
       if (Date.now() - (lastChecked[key] || 0) < CHECK_THROTTLE) continue;
 
       lastChecked[key] = Date.now();
-      
+
       const { success, message } = await checkDeparture(entry, gtfsData);
 
       if (!success) {
-        postNotification(message, entry.users);
+        postNotification(message, users);
       } else {
         // Only notify if the message changes, which is what we really care about.
         const existing = checkResults[key];
@@ -160,8 +178,10 @@ async function main() {
         }
 
         checkResults[key] = message;
-        postNotification(message, entry.users);
-        announcements.push({ msg: message, audio: true });
+        postNotification(message, users);
+        if (audio) {
+          announcements.push({ msg: message, audio: true });
+        }
       }
     }
 
@@ -174,6 +194,9 @@ async function main() {
     for (const k of Object.keys(lastChecked)) {
       if (!k.endsWith(`|${today}`)) delete lastChecked[k];
     }
+    for (const d of skipDates) {
+      if (d < today) skipDates.delete(d);
+    }
 
     gtfsData = null;
   }
@@ -182,7 +205,36 @@ async function main() {
   setInterval(runChecks, POLL_INTERVAL);
 }
 
+function startServer() {
+  // ─── HTTP control server ──────────────────────────────────────────────────────
+  const app = express();
+  app.use(express.json());
+
+  // Snooze: suppress checks for 24 hours.
+  app.post('/snooze', (req, res) => {
+    snoozeUntil = dayjs().add('1', 'day');
+    const msg = `Checks snoozed for 24 hours.`;
+    logger.info(`[HTTP] /snooze — ${msg}`);
+    res.json({ ok: true, message: msg, snoozeUntil: snoozeUntil.toISOString() });
+  });
+
+  // Skip next day: skip all checks on the next calendar day.
+  app.post('/skip-next-day', (req, res) => {
+    const nextDay = dayjs().add(1, 'day').format('YYYYMMDD');
+    skipDates.add(nextDay);
+    const msg = `Checks will be skipped on ${nextDay}.`;
+    logger.info(`[HTTP] /skip-next-day — ${msg}`);
+    res.json({ ok: true, message: msg, skippedDate: nextDay });
+  });
+
+  app.listen(HTTP_PORT, () => {
+    logger.info(`[HTTP] Control server listening on port ${HTTP_PORT}`);
+  });
+}
+
 main().catch((err) => {
   logger.error(`Fatal: ${err.message}`);
   process.exit(1);
 });
+
+startServer();

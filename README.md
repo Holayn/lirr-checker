@@ -31,6 +31,7 @@ Edit `.env`:
 | --------------- | -------------------------------------------------------------------- |
 | `NOTIFY_URL`    | URL to POST notifications to (optional)                              |
 | `SPEAK_COMMAND` | Command to use for text-to-speech (optional, defaults to system TTS) |
+| `HTTP_PORT`     | Port for the HTTP control server (optional, defaults to `3000`)      |
 
 ### 3. Add a ding sound
 
@@ -80,6 +81,36 @@ When `users` is set and `NOTIFY_URL` is configured, the checker POSTs:
   "users": ["alice"]
 }
 ```
+
+## Control endpoints
+
+When running, the app exposes a small HTTP server (default port `3000`) for on-demand control.
+
+### `POST /snooze`
+
+Suppresses all checks for 24 hours.
+
+```sh
+curl -X POST http://localhost:3000/snooze
+```
+
+```json
+{ "ok": true, "message": "Checks snoozed for 24 hours.", "snoozeUntil": "2026-02-20T23:59:59.999Z" }
+```
+
+### `POST /skip-next-day`
+
+Skips all checks for the next calendar day.
+
+```sh
+curl -X POST http://localhost:3000/skip-next-day
+```
+
+```json
+{ "ok": true, "message": "Checks will be skipped on 20260221.", "skippedDate": "20260221" }
+```
+
+Past skip dates are pruned automatically on each poll cycle.
 
 ## Scripts
 
