@@ -24,6 +24,7 @@ const NOTIFY_WINDOW = 30 * 60; // seconds before departure to start checking
 const CHECK_THROTTLE = 5 * 60 * 1000; // ms between checks for the same departure
 const POLL_INTERVAL = 60 * 1000; // main loop cadence
 const HTTP_PORT = process.env.HTTP_PORT || 3000;
+const MINS_THRESHOLD = 5; // minimum delay in minutes to trigger notification
 
 // ─── Snooze / skip state ──────────────────────────────────────────────────────
 // snoozeUntil: Date — suppress all checks until this timestamp
@@ -96,16 +97,16 @@ async function checkDeparture(entry, gtfsData) {
   for (const trip of trips) {
     const delayInfo = getTripDelay(feed, trip.tripId, trip.srcStopId);
     const status = formatDelay(delayInfo.delay);
-    const msg =
-      `${dayjs(trip.scheduledDep, 'HH:mm:ss').format('h:mm A')} train, from ${trip.srcStopName} to ${trip.dstStopName}, ` +
-      `is ${status}.`;
-
-    results.push(msg);
+    const msg = `${status}: ${dayjs(trip.scheduledDep, 'HH:mm:ss').format('h:mm A')} ${trip.srcStopName} train to ${trip.dstStopName}`;
+    results.push({
+      message: msg,
+      delay: delayInfo.delay,
+    });
   }
 
   return {
     success: true,
-    message: results.join('\n'),
+    results,
   };
 }
 
@@ -166,23 +167,25 @@ async function main() {
 
       lastChecked[key] = Date.now();
 
-      const { success, message } = await checkDeparture(entry, gtfsData);
+      const { success, results } = await checkDeparture(entry, gtfsData);
 
-      if (!success) {
-        postNotification(message, users);
-      } else {
-        // Only notify if the message changes, which is what we really care about.
-        const existing = checkResults[key];
-        if (existing && existing === message) {
-          continue;
-        }
+      results.forEach(result => {
+        const { message } = result;
+        if (!success) {
+          postNotification(message, users);
+        } else {
+          const existing = checkResults[key];
+          if (existing && result.message === existing.message) {
+            return;
+          }
 
-        checkResults[key] = message;
-        postNotification(message, users);
-        if (audio) {
-          announcements.push({ msg: message, audio: true });
+          checkResults[key] = result;
+          postNotification(message, users);
+          if (audio) {
+            announcements.push({ msg: message, audio: true });
+          }
         }
-      }
+      });
     }
 
     for (const { msg, audio } of announcements) {
